@@ -12,110 +12,177 @@ export const useResearchStore = defineStore('research', () => {
   let lastSemanticRequestTime = 0
 
   // Persistence
-  const STORAGE_KEY = 'voix-research-state'
+  const LEGACY_STORAGE_KEY = 'voix-research-state'
+  const LIB_PREFIX = 'voix-research-lib:'
+  const LIB_LIST_KEY = 'voix-research-libraries'
+  const ACTIVE_LIB_KEY = 'voix-research-active-library'
 
-  function loadState() {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored)
+  const activeLibraryName = ref('default')
+  const libraries = ref([])
 
-        let loadedPapers = parsed.papers || []
-        let loadedConnections = parsed.connections || []
+  function normalizeState(parsed) {
+    let loadedPapers = parsed?.papers || []
+    let loadedConnections = parsed?.connections || []
 
-        // Migrate paper ids to use DOI directly
-        const idMap = new Map()
-        loadedPapers.forEach(p => {
-          if (p && p.doi) {
-            const desiredId = p.doi
-            if (!p.id || p.id !== desiredId) {
-              idMap.set(p.id, desiredId)
-            }
-          }
-        })
+    // Migrate paper ids to use DOI directly
+    const idMap = new Map()
+    loadedPapers.forEach(p => {
+      if (p && p.doi) {
+        const desiredId = p.doi
+        if (!p.id || p.id !== desiredId) {
+          idMap.set(p.id, desiredId)
+        }
+      }
+    })
 
-        if (idMap.size > 0) {
-          loadedPapers = loadedPapers.map(p => {
-            if (!p) return p
-            const currentId = p.id
-            const mappedId = idMap.get(currentId)
-            if (mappedId) {
-              return { ...p, id: mappedId }
-            }
-            if (!currentId && p.doi) {
-              return { ...p, id: p.doi }
-            }
-            return p
-          })
+    if (idMap.size > 0) {
+      loadedPapers = loadedPapers.map(p => {
+        if (!p) return p
+        const currentId = p.id
+        const mappedId = idMap.get(currentId)
+        if (mappedId) {
+          return { ...p, id: mappedId }
+        }
+        if (!currentId && p.doi) {
+          return { ...p, id: p.doi }
+        }
+        return p
+      })
 
-          loadedConnections = loadedConnections.map(c => {
-            if (!c) return c
-            let source = c.source
-            let target = c.target
+      loadedConnections = loadedConnections.map(c => {
+        if (!c) return c
+        let source = c.source
+        let target = c.target
 
-            if (idMap.has(source)) {
-              source = idMap.get(source)
-            }
-            if (idMap.has(target)) {
-              target = idMap.get(target)
-            }
-
-            const sourceHandle = c.sourceHandle || 'right'
-            const targetHandle = c.targetHandle || 'left'
-
-            const id = `e-${source}-${target}-${sourceHandle || ''}-${targetHandle || ''}`
-
-            return {
-              ...c,
-              id,
-              source,
-              target,
-              sourceHandle,
-              targetHandle
-            }
-          })
+        if (idMap.has(source)) {
+          source = idMap.get(source)
+        }
+        if (idMap.has(target)) {
+          target = idMap.get(target)
         }
 
-        // Normalize connections to ensure they have all required properties
-        loadedConnections = loadedConnections.map(c => {
-          if (!c) return c
-          const sourceHandle = c.sourceHandle || 'right'
-          const targetHandle = c.targetHandle || 'left'
+        const sourceHandle = c.sourceHandle || 'right'
+        const targetHandle = c.targetHandle || 'left'
 
-          return {
-            ...c,
-            sourceHandle,
-            targetHandle,
-            style: c.style || {
-              stroke: '#94a3b8',
-              strokeWidth: 2,
-              strokeDasharray: '0'
-            },
-            markerEnd: c.markerEnd,
-            markerStart: c.markerStart
-          }
-        })
+        const id = `e-${source}-${target}-${sourceHandle || ''}-${targetHandle || ''}`
 
-        papers.value = loadedPapers
-        connections.value = loadedConnections
+        return {
+          ...c,
+          id,
+          source,
+          target,
+          sourceHandle,
+          targetHandle
+        }
+      })
+    }
 
-        // Save the migrated data
-        saveState()
-      } catch (e) {
-        console.error('Failed to load state', e)
+    // Normalize connections to ensure they have all required properties
+    loadedConnections = loadedConnections.map(c => {
+      if (!c) return c
+      const sourceHandle = c.sourceHandle || 'right'
+      const targetHandle = c.targetHandle || 'left'
+
+      return {
+        ...c,
+        sourceHandle,
+        targetHandle,
+        style: c.style || {
+          stroke: '#94a3b8',
+          strokeWidth: 2,
+          strokeDasharray: '0'
+        },
+        markerEnd: c.markerEnd,
+        markerStart: c.markerStart
+      }
+    })
+
+    return { papers: loadedPapers, connections: loadedConnections }
+  }
+
+  function loadLibrary(name) {
+    const libName = name || 'default'
+    activeLibraryName.value = libName
+
+    // Load known libraries
+    let list = []
+    const storedList = localStorage.getItem(LIB_LIST_KEY)
+    if (storedList) {
+      try {
+        list = JSON.parse(storedList)
+      } catch {
+        list = []
       }
     }
+
+    // Migration from legacy single-library storage
+    if (!storedList) {
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+      if (legacy) {
+        try {
+          const parsed = JSON.parse(legacy)
+          const norm = normalizeState(parsed)
+          localStorage.setItem(
+            `${LIB_PREFIX}${libName}`,
+            JSON.stringify({ papers: norm.papers, connections: norm.connections })
+          )
+          list = [libName]
+          localStorage.setItem(LIB_LIST_KEY, JSON.stringify(list))
+          localStorage.removeItem(LEGACY_STORAGE_KEY)
+        } catch (e) {
+          console.error('Failed to migrate legacy state', e)
+        }
+      }
+    }
+
+    if (!list.includes(libName)) {
+      list.push(libName)
+      localStorage.setItem(LIB_LIST_KEY, JSON.stringify(list))
+    }
+
+    libraries.value = list
+
+    const raw = localStorage.getItem(`${LIB_PREFIX}${libName}`)
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        const norm = normalizeState(parsed)
+        papers.value = norm.papers
+        connections.value = norm.connections
+      } catch (e) {
+        console.error('Failed to load library', e)
+        papers.value = []
+        connections.value = []
+      }
+    } else {
+      papers.value = []
+      connections.value = []
+    }
+
+    localStorage.setItem(ACTIVE_LIB_KEY, libName)
   }
 
   function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    const libName = activeLibraryName.value || 'default'
+    const payload = {
       papers: papers.value,
       connections: connections.value
-    }))
+    }
+
+    localStorage.setItem(`${LIB_PREFIX}${libName}`, JSON.stringify(payload))
+
+    let list = libraries.value.slice()
+    if (!list.includes(libName)) {
+      list.push(libName)
+    }
+    libraries.value = list
+    localStorage.setItem(LIB_LIST_KEY, JSON.stringify(list))
+    localStorage.setItem(ACTIVE_LIB_KEY, libName)
   }
 
   // Initial Load
-  loadState()
+  const initialActive = localStorage.getItem(ACTIVE_LIB_KEY) || 'default'
+  loadLibrary(initialActive)
 
   // Watch for changes
   watch([papers, connections], () => {
@@ -432,6 +499,31 @@ export const useResearchStore = defineStore('research', () => {
       .join('\n\n')
   }
 
+  function createLibrary(name) {
+    const trimmed = String(name || '').trim()
+    if (!trimmed) return
+
+    if (!libraries.value.includes(trimmed)) {
+      libraries.value = [...libraries.value, trimmed]
+      localStorage.setItem(LIB_LIST_KEY, JSON.stringify(libraries.value))
+    }
+
+    loadLibrary(trimmed)
+  }
+
+  function switchLibrary(name) {
+    const trimmed = String(name || '').trim()
+    if (!trimmed || trimmed === activeLibraryName.value) return
+    loadLibrary(trimmed)
+  }
+
+  function loadFromRawState(rawState) {
+    const norm = normalizeState(rawState || {})
+    papers.value = norm.papers
+    connections.value = norm.connections
+    saveState()
+  }
+
   async function searchSemanticScholar(query, limit = 10) {
     const q = query.trim()
     if (!q) return []
@@ -638,12 +730,17 @@ export const useResearchStore = defineStore('research', () => {
     getPaperById,
     selectedPapers,
     openPaper,
+    activeLibraryName,
+    libraries,
     addPaper,
     loadSemanticScholarForPaper,
     searchSemanticScholar,
     createManualPaper,
     exportPaperAsBibtex,
     exportAllPapersAsBibtex,
+    createLibrary,
+    switchLibrary,
+    loadFromRawState,
     removePaper,
     updatePaperPosition,
     updatePaperMetadata,

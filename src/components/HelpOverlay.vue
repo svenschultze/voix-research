@@ -19,6 +19,14 @@
               <span class="desc">Open Semantic Scholar spotlight search to find and add papers.</span>
             </li>
             <li>
+              <span class="key">Ctrl</span> + <span class="key">S</span>
+              <span class="desc">Download the current library as a <code>.vrl</code> file (JSON).</span>
+            </li>
+            <li>
+              <span class="key">Ctrl</span> + <span class="key">O</span>
+              <span class="desc">Load a saved <code>.vrl</code> library file into the active library.</span>
+            </li>
+            <li>
               <span class="key">Shift</span> + <span class="key">Drag</span>
               <span class="desc">Draw a selection box on the canvas to select multiple papers.</span>
             </li>

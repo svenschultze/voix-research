@@ -13,6 +13,8 @@ const showManual = ref(false)
 const store = useResearchStore()
 const hasOpenPaper = computed(() => !!store.openPaper)
 const hasAnyPapers = computed(() => store.papers.length > 0)
+const libraryNames = computed(() => store.libraries || [])
+const activeLibrary = computed(() => store.activeLibraryName || 'default')
 
 function openSearch() {
   showSearch.value = true
@@ -62,10 +64,86 @@ async function copyBibtexTop() {
   }
 }
 
+function saveLibraryFile() {
+  const payload = {
+    library: activeLibrary.value,
+    papers: store.papers,
+    connections: store.connections,
+    exportedAt: new Date().toISOString()
+  }
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json'
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  const safeName = String(activeLibrary.value || 'library').replace(/[^A-Za-z0-9_\-]/g, '_')
+  a.download = `${safeName}.vrl`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+function openLibraryFile() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.vrl,application/json'
+  input.onchange = (event) => {
+    const file = event.target.files && event.target.files[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const text = String(reader.result || '')
+        const parsed = JSON.parse(text)
+        if (parsed && (parsed.papers || parsed.connections)) {
+          store.loadFromRawState({
+            papers: parsed.papers || [],
+            connections: parsed.connections || []
+          })
+        }
+      } catch (err) {
+        console.error('Failed to load library file', err)
+      }
+    }
+    reader.readAsText(file)
+  }
+  input.click()
+}
+
+function handleLibraryChange(event) {
+  const value = event.target.value
+  if (value === '__new__') {
+    const name = window.prompt('New library name:')
+    if (name && name.trim()) {
+      store.createLibrary(name.trim())
+    }
+    return
+  }
+  if (value && value !== activeLibrary.value) {
+    store.switchLibrary(value)
+  }
+}
+
 function handleKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault()
     openSearch()
+    return
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    saveLibraryFile()
+    return
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+    e.preventDefault()
+    openLibraryFile()
     return
   }
 
@@ -129,6 +207,15 @@ onBeforeUnmount(() => {
           <path d="M9 15h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
         </svg>
       </button>
+
+      <div class="library-switcher">
+        <select :value="activeLibrary" @change="handleLibraryChange">
+          <option v-for="name in libraryNames" :key="name" :value="name">
+            {{ name }}
+          </option>
+          <option value="__new__">+ New library…</option>
+        </select>
+      </div>
       <CanvasBoard />
     </div>
     <PaperDetails />
@@ -251,5 +338,21 @@ html, body, #app {
 .bibtex-button .icon {
   width: 20px;
   height: 20px;
+}
+
+.library-switcher {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+}
+
+.library-switcher select {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  border: 1px solid #e5e7eb;
+  background: rgba(255, 255, 255, 0.95);
+  color: #0f172a;
 }
 </style>
