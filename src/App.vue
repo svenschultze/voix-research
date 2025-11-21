@@ -1,4 +1,3 @@
-```vue
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import CanvasBoard from './components/CanvasBoard.vue'
@@ -6,8 +5,6 @@ import PaperDetails from './components/PaperDetails.vue'
 import SemanticSearchOverlay from './components/SemanticSearchOverlay.vue'
 import HelpOverlay from './components/HelpOverlay.vue'
 import ManualPaperOverlay from './components/ManualPaperOverlay.vue'
-import CollaborationControls from './components/CollaborationControls.vue'
-
 import { useResearchStore } from './stores/research'
 
 const showSearch = ref(false)
@@ -159,13 +156,6 @@ function handleKeydown(e) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
-  
-  // Check for room param
-  const params = new URLSearchParams(window.location.search)
-  const room = params.get('room')
-  if (room) {
-    store.initCollaboration(room)
-  }
 })
 
 onBeforeUnmount(() => {
@@ -175,7 +165,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-container">
-    <CollaborationControls />
     <div class="canvas-area">
       <button
         type="button"

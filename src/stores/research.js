@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import axios from 'axios'
-import { collaborationService } from '../services/collaboration'
 
 export const useResearchStore = defineStore('research', () => {
   const papers = ref([])
@@ -11,12 +10,6 @@ export const useResearchStore = defineStore('research', () => {
   const openPaperId = ref(null) // For details view
   const SEMANTIC_MIN_INTERVAL_MS = 1500
   let lastSemanticRequestTime = 0
-
-  // Collaboration state
-  const isRemoteUpdate = ref(false)
-  const isCollaborating = ref(false)
-  const collaborationRoomId = ref(null)
-  const onlineUsers = ref(0)
 
   // Persistence
   const LEGACY_STORAGE_KEY = 'voix-research-state'
@@ -170,10 +163,6 @@ export const useResearchStore = defineStore('research', () => {
   }
 
   function saveState() {
-    // If collaborating, we rely on Yjs persistence, but we can still save to local storage as backup/cache
-    // However, Yjs persistence (IndexedDB) is separate.
-    // We'll continue to save to localStorage for now to maintain existing behavior for non-collab mode.
-
     const libName = activeLibraryName.value || 'default'
     const payload = {
       papers: papers.value,
@@ -197,77 +186,8 @@ export const useResearchStore = defineStore('research', () => {
 
   // Watch for changes
   watch([papers, connections], () => {
-    if (isRemoteUpdate.value) return
-
     saveState()
-
-    if (isCollaborating.value) {
-      collaborationService.updateLocalState(papers.value, connections.value)
-    }
   }, { deep: true })
-
-  function initCollaboration(roomId) {
-    if (!roomId) return
-
-    collaborationRoomId.value = roomId
-    isCollaborating.value = true
-
-    // Initialize service
-    // We pass 'this' (the store instance) implicitly via the bindState method or just pass the store object if needed
-    // But here we are inside the store definition.
-    // We can pass an object with the methods we want the service to call.
-
-    collaborationService.init(roomId, {
-      loadFromCollaboration: (p, c) => loadFromCollaboration(p, c)
-    })
-
-    // If we have local data and it's a fresh room, we might want to push it?
-    // collaborationService handles initial sync.
-    // If we want to force push local state:
-    collaborationService.updateLocalState(papers.value, connections.value)
-
-    // Setup awareness listener if needed
-    collaborationService.awareness.on('change', () => {
-      const states = collaborationService.awareness.getStates()
-      onlineUsers.value = states.size
-    })
-  }
-
-  function loadFromCollaboration(remotePapers, remoteConnections) {
-    isRemoteUpdate.value = true
-
-    // We need to be careful not to lose selection state if possible, 
-    // but replacing arrays might reset it if we rely on object references.
-    // However, our selection uses IDs, so it should be fine.
-
-    papers.value = remotePapers
-    connections.value = remoteConnections
-
-    // Wait for next tick to reset flag? 
-    // Watchers fire synchronously for ref mutations usually.
-    // But deep watch might be tricky.
-    // Let's reset it immediately after.
-    // Actually, since we are inside the action, the watch might trigger *after* this function finishes?
-    // No, Vue reactivity is synchronous.
-
-    // To be safe, we use a timeout or nextTick, OR just rely on the fact that we set it to true before mutation.
-    // The watch callback checks the flag.
-
-    // We need to ensure the watch callback sees true.
-    // It should work.
-
-    setTimeout(() => {
-      isRemoteUpdate.value = false
-    }, 0)
-  }
-
-  function stopCollaboration() {
-    collaborationService.destroy()
-    isCollaborating.value = false
-    collaborationRoomId.value = null
-    onlineUsers.value = 0
-  }
-
 
   // Getters
   const getPaperById = computed(() => (id) => papers.value.find(p => p.id === id))
@@ -833,11 +753,6 @@ export const useResearchStore = defineStore('research', () => {
     clearSelection,
     selectEdge,
     clearEdgeSelection,
-    setOpenPaper,
-    isCollaborating,
-    collaborationRoomId,
-    onlineUsers,
-    initCollaboration,
-    stopCollaboration
+    setOpenPaper
   }
 })

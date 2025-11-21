@@ -9,8 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "signaling": "node ./node_modules/y-webrtc/bin/server.js"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@vue-flow/background": "^1.3.2",
@@ -20,10 +19,7 @@
     "axios": "^1.13.2",
     "pinia": "^3.0.3",
     "vue": "^3.5.22",
-    "vue-router": "^4.6.3",
-    "y-indexeddb": "^9.0.12",
-    "y-webrtc": "^10.3.0",
-    "yjs": "^13.6.27"
+    "vue-router": "^4.6.3"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.1",
