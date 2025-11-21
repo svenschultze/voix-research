@@ -9,13 +9,12 @@
       <form class="panel-body" @submit.prevent="submit">
         <div class="row">
           <div class="field">
-            <label>DOI<span class="required">*</span></label>
+            <label>Identifier (DOI / ISBN / other)</label>
             <input
               v-model="form.doi"
               type="text"
               class="input"
-              placeholder="e.g. 10.1145/3299869.3300081 or 10.48550/arXiv.2106.15928"
-              required
+              :placeholder="identifierPlaceholder"
             />
           </div>
         </div>
@@ -99,7 +98,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useResearchStore } from '../stores/research'
 
 const emit = defineEmits(['close'])
@@ -118,6 +117,31 @@ const form = ref({
 const submitting = ref(false)
 const error = ref('')
 
+const identifierPreview = computed(() => {
+  if (form.value.doi && form.value.doi.trim()) return ''
+
+  const authorsStr = String(form.value.authors || '').trim()
+  const firstAuthorPart = authorsStr ? authorsStr.split(',')[0].trim() : 'Anon'
+  const lastName = firstAuthorPart.split(' ').slice(-1)[0] || 'Anon'
+  const yearPart = String(form.value.year || 'xxxx').trim() || 'xxxx'
+  const titleFirstWord = String(form.value.title || 'Untitled').trim().split(/\s+/)[0] || 'Untitled'
+
+  const safe = (s) => s.replace(/[^A-Za-z0-9]/g, '')
+  const base = `${safe(lastName)}${safe(yearPart)}_${safe(titleFirstWord)}`
+
+  return base || ''
+})
+
+const identifierPlaceholder = computed(() => {
+  if (form.value.doi && form.value.doi.trim()) {
+    return 'Optional: 10.1145/..., 10.48550/arXiv..., ISBN, etc.'
+  }
+  if (identifierPreview.value) {
+    return `Will become: ${identifierPreview.value}`
+  }
+  return 'Optional identifier (will be generated)'
+})
+
 function normalizeDoi(raw) {
   if (!raw) return ''
   let doi = String(raw).trim()
@@ -128,10 +152,6 @@ function normalizeDoi(raw) {
 async function submit() {
   error.value = ''
   const cleanDoi = normalizeDoi(form.value.doi)
-  if (!cleanDoi) {
-    error.value = 'DOI is required.'
-    return
-  }
 
   submitting.value = true
   try {

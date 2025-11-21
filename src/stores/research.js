@@ -313,22 +313,40 @@ export const useResearchStore = defineStore('research', () => {
   }
 
   async function createManualPaper(payload) {
-    const cleanDoi = String(payload.doi || '').trim()
-    if (!cleanDoi) {
-      throw new Error('DOI is required for manual papers')
+    const cleanId = String(payload.doi || '').trim()
+
+    if (cleanId) {
+      const existing = papers.value.find(p => p.doi === cleanId || p.id === cleanId)
+      if (existing) {
+        const updates = {}
+        if (payload.title) updates.title = payload.title
+        if (payload.authors) updates.authors = payload.authors
+        if (payload.year) updates.year = payload.year
+        if (payload.description) updates.description = payload.description
+        if (payload.notes) updates.notes = payload.notes
+        Object.assign(existing, updates)
+        return existing
+      }
     }
 
-    const existing = papers.value.find(p => p.doi === cleanDoi)
-    if (existing) {
-      // Optionally update existing paper with any provided fields
-      const updates = {}
-      if (payload.title) updates.title = payload.title
-      if (payload.authors) updates.authors = payload.authors
-      if (payload.year) updates.year = payload.year
-      if (payload.description) updates.description = payload.description
-      if (payload.notes) updates.notes = payload.notes
-      Object.assign(existing, updates)
-      return existing
+    let identifier = cleanId
+
+    if (!identifier) {
+      const authorsStr = String(payload.authors || '').trim()
+      const firstAuthorPart = authorsStr ? authorsStr.split(',')[0].trim() : 'Anon'
+      const lastName = firstAuthorPart.split(' ').slice(-1)[0] || 'Anon'
+      const yearPart = String(payload.year || 'xxxx').trim() || 'xxxx'
+      const titleFirstWord = String(payload.title || 'Untitled').trim().split(/\s+/)[0] || 'Untitled'
+
+      const safe = (s) => s.replace(/[^A-Za-z0-9]/g, '')
+      const base = `${safe(lastName)}${safe(yearPart)}_${safe(titleFirstWord)}` || `Paper_${Math.random().toString(36).slice(2, 6)}`
+
+      let candidate = base
+      while (papers.value.some(p => p.id === candidate || p.doi === candidate)) {
+        candidate = `${base}_${Math.random().toString(36).slice(2, 6)}`
+      }
+
+      identifier = candidate
     }
 
     const position = {
@@ -337,9 +355,9 @@ export const useResearchStore = defineStore('research', () => {
     }
 
     const newPaper = {
-      id: cleanDoi,
-      doi: cleanDoi,
-      title: payload.title || cleanDoi,
+      id: identifier,
+      doi: identifier,
+      title: payload.title || identifier,
       authors: payload.authors || '',
       year: payload.year || '',
       description: payload.description || '',
@@ -358,6 +376,60 @@ export const useResearchStore = defineStore('research', () => {
 
     papers.value.push(newPaper)
     return newPaper
+  }
+
+  function buildBibtexEntry(paper) {
+    if (!paper) return ''
+
+    const raw = paper.data || {}
+    const type = raw.type || 'article'
+
+    const authorsStr = paper.authors || ''
+    const firstAuthorPart = authorsStr.split(',')[0] || 'key'
+    const lastName = firstAuthorPart.trim().split(' ').slice(-1)[0] || 'key'
+    const year = paper.year || 'xxxx'
+    const key = `${lastName}${year}`.replace(/[^A-Za-z0-9]/g, '') || 'key'
+
+    const fields = {}
+
+    if (paper.title) fields.title = paper.title
+    if (paper.authors) fields.author = paper.authors
+    if (year && year !== 'N/A') fields.year = year
+    if (paper.doi) fields.doi = paper.doi
+
+    const container = raw['container-title']
+    if (container) {
+      fields.journal = Array.isArray(container) ? container[0] : container
+    }
+    if (raw.volume) fields.volume = raw.volume
+    if (raw.issue) fields.number = raw.issue
+    if (raw.page) fields.pages = raw.page
+    if (raw.publisher) fields.publisher = raw.publisher
+
+    const lines = [`@${type}{${key},`]
+    const entries = Object.entries(fields)
+    entries.forEach(([k, v], index) => {
+      const isLast = index === entries.length - 1
+      const value = String(v).trim()
+      lines.push(`  ${k} = {${value}}${isLast ? '' : ','}`)
+    })
+    lines.push('}')
+
+    return lines.join('\n')
+  }
+
+  function exportPaperAsBibtex(idOrDoi) {
+    const p = papers.value.find(p => p.id === idOrDoi || p.doi === idOrDoi)
+    if (!p) return ''
+    return buildBibtexEntry(p)
+  }
+
+  function exportAllPapersAsBibtex() {
+    if (!papers.value.length) return ''
+    return papers.value
+      .map(buildBibtexEntry)
+      .filter(Boolean)
+      .join('\n\n')
   }
 
   async function searchSemanticScholar(query, limit = 10) {
@@ -570,6 +642,8 @@ export const useResearchStore = defineStore('research', () => {
     loadSemanticScholarForPaper,
     searchSemanticScholar,
     createManualPaper,
+    exportPaperAsBibtex,
+    exportAllPapersAsBibtex,
     removePaper,
     updatePaperPosition,
     updatePaperMetadata,

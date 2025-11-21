@@ -1,14 +1,18 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import CanvasBoard from './components/CanvasBoard.vue'
 import PaperDetails from './components/PaperDetails.vue'
 import SemanticSearchOverlay from './components/SemanticSearchOverlay.vue'
 import HelpOverlay from './components/HelpOverlay.vue'
 import ManualPaperOverlay from './components/ManualPaperOverlay.vue'
+import { useResearchStore } from './stores/research'
 
 const showSearch = ref(false)
 const showHelp = ref(false)
 const showManual = ref(false)
+const store = useResearchStore()
+const hasOpenPaper = computed(() => !!store.openPaper)
+const hasAnyPapers = computed(() => store.papers.length > 0)
 
 function openSearch() {
   showSearch.value = true
@@ -32,6 +36,30 @@ function openManual() {
 
 function closeManual() {
   showManual.value = false
+}
+
+async function copyBibtexTop() {
+  if (!store.papers.length) return
+  try {
+    const bibtex = store.exportAllPapersAsBibtex()
+    if (!bibtex) return
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(bibtex)
+    } else {
+      console.log(bibtex)
+    }
+    const blob = new Blob([bibtex], { type: 'text/x-bibtex' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'voix-research.bib'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    console.error('Failed to copy BibTeX', e)
+  }
 }
 
 function handleKeydown(e) {
@@ -65,16 +93,41 @@ onBeforeUnmount(() => {
         class="help-button"
         @click="openHelp"
         aria-label="Show keyboard shortcuts and help"
+        title="Help (shortcuts & features)"
       >
-        ?
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="1.6" />
+          <path d="M12 16v-1.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          <path d="M9.8 9.2a2.2 2.2 0 0 1 4.4 0c0 1.1-.7 1.6-1.4 2.1-.6.4-1 .7-1 1.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none" />
+        </svg>
       </button>
       <button
         type="button"
         class="add-button"
         @click="openManual"
         aria-label="Add paper manually"
+        title="Add paper manually"
       >
-        +
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="1.6" />
+          <path d="M12 8v8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          <path d="M8 12h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="bibtex-button"
+        @click="copyBibtexTop"
+        :disabled="!hasAnyPapers"
+        aria-label="Download BibTeX for all papers"
+        title="Download BibTeX for all papers"
+      >
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <rect x="6" y="4" width="12" height="16" rx="2" ry="2" stroke="currentColor" fill="none" stroke-width="1.6" />
+          <path d="M9 9h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          <path d="M9 12h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          <path d="M9 15h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+        </svg>
       </button>
       <CanvasBoard />
     </div>
@@ -83,6 +136,7 @@ onBeforeUnmount(() => {
     <SemanticSearchOverlay v-if="showSearch" @close="closeSearch" />
     <HelpOverlay v-if="showHelp" @close="closeHelp" />
     <ManualPaperOverlay v-if="showManual" @close="closeManual" />
+
   </div>
 </template>
 
@@ -119,8 +173,8 @@ html, body, #app {
   top: 16px;
   left: 16px;
   z-index: 20;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 9999px;
   border: 1px solid #e2e8f0;
   background: rgba(255, 255, 255, 0.95);
@@ -143,8 +197,8 @@ html, body, #app {
   top: 16px;
   left: 56px;
   z-index: 20;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 9999px;
   border: 1px solid #e2e8f0;
   background: rgba(255, 255, 255, 0.95);
@@ -160,5 +214,42 @@ html, body, #app {
 
 .add-button:hover {
   background: #f8fafc;
+}
+
+.bibtex-button {
+  position: absolute;
+  top: 16px;
+  left: 96px;
+  z-index: 20;
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  border: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.95);
+  color: #0f172a;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-shadow: 0 4px 8px rgba(15, 23, 42, 0.15);
+}
+
+.bibtex-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+
+.bibtex-button:not(:disabled):hover {
+  background: #f8fafc;
+}
+
+.help-button .icon,
+.add-button .icon,
+.bibtex-button .icon {
+  width: 20px;
+  height: 20px;
 }
 </style>

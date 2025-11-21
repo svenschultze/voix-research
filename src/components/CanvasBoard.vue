@@ -136,16 +136,25 @@
 
     <tool
       name="create_manual_paper"
-      description="Create a paper manually without fetching external metadata; all fields are optional except DOI"
+      description="Create a paper manually without fetching external metadata; all fields are optional and an identifier will be generated if none is provided"
       return="paper"
       @call="handleCreateManualPaperTool"
     >
-      <prop name="doi" type="string" required />
+      <prop name="doi" type="string" />
       <prop name="title" type="string" />
       <prop name="authors" type="string" />
       <prop name="year" type="string" />
       <prop name="description" type="string" />
       <prop name="notes" type="string" />
+    </tool>
+
+    <tool
+      name="export_paper_bibtex"
+      description="Export a paper as a BibTeX entry string; identify the paper by its ID (DOI)"
+      return="bibtex"
+      @call="handleExportBibtexTool"
+    >
+      <prop name="paperId" type="string" required />
     </tool>
 
     <tool
@@ -726,18 +735,9 @@ async function handleCreateManualPaperTool(e) {
     try {
         const doiRaw = e.detail.doi
         let doi = typeof doiRaw === 'string' ? doiRaw.trim() : ''
-        if (!doi) {
-            const result = {
-                success: false,
-                error: 'DOI must not be empty',
-                paper: null
-            }
-            Object.assign(e.detail, result)
-            e.target.dispatchEvent(new CustomEvent('return', { detail: result }))
-            return
+        if (doi) {
+            doi = doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
         }
-
-        doi = doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
 
         const payload = {
             doi,
@@ -762,6 +762,50 @@ async function handleCreateManualPaperTool(e) {
             success: false,
             error: err.message,
             paper: null
+        }
+        Object.assign(e.detail, result)
+        e.target.dispatchEvent(new CustomEvent('return', { detail: result }))
+    }
+}
+
+function handleExportBibtexTool(e) {
+    try {
+        const paperId = String(e.detail.paperId || '').trim()
+        if (!paperId) {
+            const result = {
+                success: false,
+                error: 'paperId must not be empty',
+                bibtex: ''
+            }
+            Object.assign(e.detail, result)
+            e.target.dispatchEvent(new CustomEvent('return', { detail: result }))
+            return
+        }
+
+        const bibtex = researchStore.exportPaperAsBibtex(paperId)
+        if (!bibtex) {
+            const result = {
+                success: false,
+                error: `No paper found for id ${paperId}`,
+                bibtex: ''
+            }
+            Object.assign(e.detail, result)
+            e.target.dispatchEvent(new CustomEvent('return', { detail: result }))
+            return
+        }
+
+        const result = {
+            success: true,
+            message: `Exported paper ${paperId} as BibTeX`,
+            bibtex
+        }
+        Object.assign(e.detail, result)
+        e.target.dispatchEvent(new CustomEvent('return', { detail: result }))
+    } catch (err) {
+        const result = {
+            success: false,
+            error: err.message,
+            bibtex: ''
         }
         Object.assign(e.detail, result)
         e.target.dispatchEvent(new CustomEvent('return', { detail: result }))

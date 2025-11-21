@@ -160,6 +160,7 @@
       </div>
 
       <div class="actions">
+         <button @click="copyBibtex" class="secondary-btn">Copy BibTeX</button>
          <button @click="deletePaper" class="delete-btn">Delete Paper</button>
       </div>
     </div>
@@ -269,6 +270,21 @@ async function loadSemantic() {
     console.error('Failed to load Semantic Scholar data', e)
   } finally {
     semanticLoading.value = false
+  }
+}
+
+async function copyBibtex() {
+  if (!paper.value) return
+  try {
+    const bibtex = store.exportPaperAsBibtex(paper.value.id)
+    if (!bibtex) return
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(bibtex)
+    } else {
+      console.log(bibtex)
+    }
+  } catch (e) {
+    console.error('Failed to copy BibTeX', e)
   }
 }
 </script>
@@ -404,25 +420,44 @@ label {
 }
 
 .actions {
-    margin-top: auto;
-    padding-top: 20px;
-    border-top: 1px solid #e2e8f0;
+  margin-top: auto;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.secondary-btn {
+  padding: 8px 12px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.2s;
+}
+
+.secondary-btn:hover {
+  background: #dbeafe;
 }
 
 .delete-btn {
-    width: 100%;
-    padding: 10px;
-    background: #fee2e2;
-    color: #ef4444;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
+  padding: 8px 12px;
+  background: #fee2e2;
+  color: #ef4444;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.2s;
 }
 
 .delete-btn:hover {
-    background: #fecaca;
+  background: #fecaca;
 }
 
 .citations-section {
