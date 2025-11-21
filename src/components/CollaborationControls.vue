@@ -1,51 +1,4 @@
-<script setup>
-import { ref, computed } from 'vue'
-import { useResearchStore } from '../stores/research'
 
-const store = useResearchStore()
-const showInput = ref(false)
-const roomIdInput = ref('')
-
-const isConnected = computed(() => store.isCollaborating)
-const onlineCount = computed(() => store.onlineUsers)
-const currentRoom = computed(() => store.collaborationRoomId)
-
-function startSession() {
-  const newRoomId = Math.random().toString(36).substring(2, 15)
-  store.initCollaboration(newRoomId)
-  updateUrl(newRoomId)
-}
-
-function joinSession() {
-  if (roomIdInput.value) {
-    store.initCollaboration(roomIdInput.value)
-    updateUrl(roomIdInput.value)
-    showInput.value = false
-  }
-}
-
-function disconnect() {
-  store.stopCollaboration()
-  updateUrl(null)
-}
-
-function updateUrl(roomId) {
-  const url = new URL(window.location.href)
-  if (roomId) {
-    url.searchParams.set('room', roomId)
-  } else {
-    url.searchParams.delete('room')
-  }
-  window.history.pushState({}, '', url)
-}
-
-function copyLink() {
-  const url = window.location.href
-  navigator.clipboard.writeText(url)
-  // Could add a toast notification here
-  alert('Link copied to clipboard!')
-}
-</script>
 
 <template>
   <div class="collaboration-controls">
@@ -75,14 +28,85 @@ function copyLink() {
       </div>
       <button @click="disconnect" class="disconnect-btn">Stop</button>
     </div>
+    
+    <!-- Debug Controls -->
+    <div v-if="isConnected" class="debug-controls">
+      <button @click="forcePush" class="debug-btn" title="Force Push Local State">⬆ Push</button>
+      <button @click="logState" class="debug-btn" title="Log Yjs State">Unknown Log</button>
+    </div>
   </div>
 </template>
+
+<script setup>
+import { ref, computed } from 'vue'
+import { useResearchStore } from '../stores/research'
+import { collaborationService } from '../services/collaboration'
+
+const store = useResearchStore()
+const showInput = ref(false)
+const roomIdInput = ref('')
+
+const isConnected = computed(() => store.isCollaborating)
+const onlineCount = computed(() => store.onlineUsers)
+const currentRoom = computed(() => store.collaborationRoomId)
+
+function startSession() {
+  const newRoomId = Math.random().toString(36).substring(2, 15)
+  store.initCollaboration(newRoomId, true) // Owner
+  updateUrl(newRoomId)
+}
+
+function joinSession() {
+  if (roomIdInput.value) {
+    store.initCollaboration(roomIdInput.value, false) // Guest
+    updateUrl(roomIdInput.value)
+    showInput.value = false
+  }
+}
+
+function disconnect() {
+  store.stopCollaboration()
+  updateUrl(null)
+}
+
+function updateUrl(roomId) {
+  const url = new URL(window.location.href)
+  if (roomId) {
+    url.searchParams.set('room', roomId)
+  } else {
+    url.searchParams.delete('room')
+  }
+  window.history.pushState({}, '', url)
+}
+
+function copyLink() {
+  const url = window.location.href
+  navigator.clipboard.writeText(url)
+  alert('Link copied to clipboard!')
+}
+
+function forcePush() {
+  console.log('Force pushing local state...')
+  collaborationService.updateLocalState(store.papers, store.connections)
+}
+
+function logState() {
+  console.log('--- Yjs State Debug ---')
+  console.log('Room:', collaborationService.roomId)
+  console.log('Synced:', collaborationService.isSynced)
+  console.log('Papers Map Size:', collaborationService.papersMap?.size)
+  console.log('Papers Map Content:', collaborationService.papersMap?.toJSON())
+  console.log('Connections Array Length:', collaborationService.connectionsArray?.length)
+  console.log('Connections Array Content:', collaborationService.connectionsArray?.toArray())
+  console.log('Awareness States:', collaborationService.awareness?.getStates())
+  console.log('-----------------------')
+}
+</script>
 
 <style scoped>
 .collaboration-controls {
   position: fixed;
   top: 1rem;
-  right: 1rem;
   z-index: 100;
   background: white;
   padding: 0.5rem;

@@ -160,11 +160,11 @@ function handleKeydown(e) {
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   
-  // Check for room param
+  // Check for room param - if present, join as guest
   const params = new URLSearchParams(window.location.search)
   const room = params.get('room')
   if (room) {
-    store.initCollaboration(room)
+    store.initCollaboration(room, false) // Join as guest
   }
 })
 

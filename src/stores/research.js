@@ -17,6 +17,7 @@ export const useResearchStore = defineStore('research', () => {
   const isCollaborating = ref(false)
   const collaborationRoomId = ref(null)
   const onlineUsers = ref(0)
+  const isCollaborationOwner = ref(false) // Owner vs Guest
 
   // Persistence
   const LEGACY_STORAGE_KEY = 'voix-research-state'
@@ -195,38 +196,67 @@ export const useResearchStore = defineStore('research', () => {
   const initialActive = localStorage.getItem(ACTIVE_LIB_KEY) || 'default'
   loadLibrary(initialActive)
 
-  // Watch for changes
-  watch([papers, connections], () => {
-    if (isRemoteUpdate.value) return
-
-    saveState()
-
-    if (isCollaborating.value) {
-      collaborationService.updateLocalState(papers.value, connections.value)
+  // Simple throttle implementation
+  function throttle(func, limit) {
+    let inThrottle
+    return function (...args) {
+      if (!inThrottle) {
+        func.apply(this, args)
+        inThrottle = true
+        setTimeout(() => inThrottle = false, limit)
+      }
     }
+  }
+
+  const throttledSave = throttle(() => {
+    // Only owner saves to localStorage during collaboration
+    if (!isCollaborating.value || isCollaborationOwner.value) {
+      saveState()
+    }
+  }, 100)
+
+  // Auto-sync to Yjs when collaborating - holistic approach
+  watch([papers, connections], () => {
+    if (isRemoteUpdate.value) return // Don't sync remote changes back to Yjs
+    if (isCollaborating.value) {
+      // Sync entire state to Yjs - it handles diffing efficiently
+      collaborationService.syncState(papers.value, connections.value)
+    }
+    throttledSave()
   }, { deep: true })
 
-  function initCollaboration(roomId) {
+  function initCollaboration(roomId, asOwner = true) {
     if (!roomId) return
 
+    isCollaborationOwner.value = asOwner
     collaborationRoomId.value = roomId
     isCollaborating.value = true
 
-    // Initialize service
-    // We pass 'this' (the store instance) implicitly via the bindState method or just pass the store object if needed
-    // But here we are inside the store definition.
-    // We can pass an object with the methods we want the service to call.
+    if (asOwner) {
+      // Owner: Share current localStorage state
+      console.log('Starting collaboration as OWNER with', papers.value.length, 'papers')
+      collaborationService.init(roomId, {
+        loadFromCollaboration: (p, c) => loadFromCollaboration(p, c)
+      }, papers.value, connections.value)
+    } else {
+      // Guest: Start with empty state, load from shared room
+      console.log('Joining collaboration as GUEST')
+      const savedPapers = [...papers.value]
+      const savedConnections = [...connections.value]
 
-    collaborationService.init(roomId, {
-      loadFromCollaboration: (p, c) => loadFromCollaboration(p, c)
-    })
+      // Clear local state for guest
+      papers.value = []
+      connections.value = []
 
-    // If we have local data and it's a fresh room, we might want to push it?
-    // collaborationService handles initial sync.
-    // If we want to force push local state:
-    collaborationService.updateLocalState(papers.value, connections.value)
+      // Store original state to restore on disconnect
+      sessionStorage.setItem('preCollabPapers', JSON.stringify(savedPapers))
+      sessionStorage.setItem('preCollabConnections', JSON.stringify(savedConnections))
 
-    // Setup awareness listener if needed
+      collaborationService.init(roomId, {
+        loadFromCollaboration: (p, c) => loadFromCollaboration(p, c)
+      }, [], [])
+    }
+
     collaborationService.awareness.on('change', () => {
       const states = collaborationService.awareness.getStates()
       onlineUsers.value = states.size
@@ -234,27 +264,13 @@ export const useResearchStore = defineStore('research', () => {
   }
 
   function loadFromCollaboration(remotePapers, remoteConnections) {
+    console.log('loadFromCollaboration called with', remotePapers.length, 'papers')
     isRemoteUpdate.value = true
-
-    // We need to be careful not to lose selection state if possible, 
-    // but replacing arrays might reset it if we rely on object references.
-    // However, our selection uses IDs, so it should be fine.
 
     papers.value = remotePapers
     connections.value = remoteConnections
 
-    // Wait for next tick to reset flag? 
-    // Watchers fire synchronously for ref mutations usually.
-    // But deep watch might be tricky.
-    // Let's reset it immediately after.
-    // Actually, since we are inside the action, the watch might trigger *after* this function finishes?
-    // No, Vue reactivity is synchronous.
-
-    // To be safe, we use a timeout or nextTick, OR just rely on the fact that we set it to true before mutation.
-    // The watch callback checks the flag.
-
-    // We need to ensure the watch callback sees true.
-    // It should work.
+    console.log('Updated store: papers.value.length =', papers.value.length)
 
     setTimeout(() => {
       isRemoteUpdate.value = false
@@ -263,9 +279,26 @@ export const useResearchStore = defineStore('research', () => {
 
   function stopCollaboration() {
     collaborationService.destroy()
+
+    // If guest, restore their original board
+    if (!isCollaborationOwner.value) {
+      const savedPapers = sessionStorage.getItem('preCollabPapers')
+      const savedConnections = sessionStorage.getItem('preCollabConnections')
+
+      if (savedPapers) {
+        papers.value = JSON.parse(savedPapers)
+        sessionStorage.removeItem('preCollabPapers')
+      }
+      if (savedConnections) {
+        connections.value = JSON.parse(savedConnections)
+        sessionStorage.removeItem('preCollabConnections')
+      }
+    }
+
     isCollaborating.value = false
     collaborationRoomId.value = null
     onlineUsers.value = 0
+    isCollaborationOwner.value = false
   }
 
 
@@ -522,6 +555,7 @@ export const useResearchStore = defineStore('research', () => {
     }
 
     papers.value.push(newPaper)
+    triggerSync()
     return newPaper
   }
 
@@ -602,6 +636,7 @@ export const useResearchStore = defineStore('research', () => {
     papers.value = norm.papers
     connections.value = norm.connections
     saveState()
+    triggerSync()
   }
 
   async function searchSemanticScholar(query, limit = 10) {
@@ -789,7 +824,12 @@ export const useResearchStore = defineStore('research', () => {
   function updateConnectionStyle(id, styleUpdates) {
     const connection = connections.value.find(c => c.id === id)
     if (connection) {
-      if (!connection.style) connection.style = {}
+      if (!connection.style) {
+        connection.style = {
+          stroke: '#94a3b8',
+          strokeWidth: 2
+        }
+      }
       Object.assign(connection.style, styleUpdates)
     }
   }
@@ -837,7 +877,10 @@ export const useResearchStore = defineStore('research', () => {
     isCollaborating,
     collaborationRoomId,
     onlineUsers,
+    isCollaborationOwner,
     initCollaboration,
     stopCollaboration
   }
-})
+}
+)
+

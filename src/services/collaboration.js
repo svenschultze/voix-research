@@ -1,21 +1,19 @@
 import * as Y from 'yjs'
-import { WebrtcProvider } from 'y-webrtc'
-import { IndexeddbPersistence } from 'y-indexeddb'
+import { toRaw } from 'vue'
+import { WebsocketProvider } from 'y-websocket'
 
 class CollaborationService {
     constructor() {
         this.doc = null
         this.provider = null
-        this.persistence = null
-        this.papersMap = null
-        this.connectionsArray = null
+        this.stateText = null  // Y.Text for JSON storage
         this.awareness = null
         this.store = null
         this.roomId = null
         this.isSynced = false
     }
 
-    init(roomId, store) {
+    init(roomId, store, initialPapers = [], initialConnections = []) {
         if (this.doc) {
             this.destroy()
         }
@@ -24,111 +22,108 @@ class CollaborationService {
         this.store = store
         this.doc = new Y.Doc()
 
-        // Initialize types
-        this.papersMap = this.doc.getMap('papers')
-        this.connectionsArray = this.doc.getArray('connections')
+        // Use a single Text object for JSON state
+        this.stateText = this.doc.getText('state')
 
-        // Setup WebRTC provider
-        // Using default public signaling servers for now
-        this.provider = new WebrtcProvider(roomId, this.doc, {
-            signaling: ['ws://localhost:4444', 'wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com', 'wss://y-webrtc-signaling-us.herokuapp.com']
-        })
-
+        // Setup WebSocket provider
+        this.provider = new WebsocketProvider('ws://localhost:1234', roomId, this.doc)
         this.awareness = this.provider.awareness
 
-        // Setup Persistence
-        this.persistence = new IndexeddbPersistence(roomId, this.doc)
+        // Debug connection status
+        this.provider.on('status', ({ status }) => {
+            console.log('WebSocket status:', status)
 
-        this.persistence.on('synced', () => {
-            console.log('Content loaded from IndexedDB')
-            this.isSynced = true
-            this.applyRemoteToStore()
-        })
-
-        // Listen for remote updates
-        this.papersMap.observe(() => {
-            if (!this.isLocalUpdate) {
-                this.applyRemoteToStore()
+            // Check if synced after connection
+            if (status === 'connected' && !this.isSynced) {
+                setTimeout(() => {
+                    this.handleInitialSync(initialPapers, initialConnections)
+                }, 100) // Small delay to ensure sync is complete
             }
         })
 
-        this.connectionsArray.observe(() => {
-            if (!this.isLocalUpdate) {
-                this.applyRemoteToStore()
+        this.provider.on('connection-error', (error) => {
+            console.error('WebSocket connection error:', error)
+        })
+
+        this.provider.on('connection-close', () => {
+            console.log('WebSocket connection closed')
+        })
+
+        // Listen for remote updates to the JSON text
+        this.stateText.observe(() => {
+            const jsonStr = this.stateText.toString()
+            if (jsonStr) {
+                try {
+                    const state = JSON.parse(jsonStr)
+                    console.log('Applying remote data:', state.papers?.length || 0, 'papers')
+                    this.store.loadFromCollaboration(state.papers || [], state.connections || [])
+                } catch (e) {
+                    console.error('Failed to parse remote state:', e)
+                }
             }
         })
 
-        // Initial sync from store if empty (optional, usually we trust Yjs/IndexedDB first)
-        // But if it's a new room and we have local state, we might want to push it?
-        // For simplicity, we'll assume the Yjs doc is the source of truth once connected.
+        this.provider.on('peers', (peers) => {
+            console.log('Connected peers:', peers)
+        })
     }
 
-    applyRemoteToStore() {
-        if (!this.store) return
+    handleInitialSync(initialPapers, initialConnections) {
+        if (this.isSynced) return
+        this.isSynced = true
 
-        const papers = Array.from(this.papersMap.values())
-        const connections = this.connectionsArray.toArray()
+        const currentState = this.stateText.toString()
+        const hasRemoteData = currentState.length > 0
 
-        this.store.loadFromCollaboration(papers, connections)
+        if (!hasRemoteData && initialPapers.length > 0) {
+            // Room is empty, seed with our initial data
+            console.log('Room is empty, seeding with', initialPapers.length, 'papers')
+            const state = {
+                papers: initialPapers,
+                connections: initialConnections
+            }
+            this.stateText.insert(0, JSON.stringify(state))
+        } else if (hasRemoteData) {
+            // Room has data, load it
+            try {
+                const state = JSON.parse(currentState)
+                console.log('Room has', state.papers?.length || 0, 'papers, loading from shared state')
+                this.store.loadFromCollaboration(state.papers || [], state.connections || [])
+            } catch (e) {
+                console.error('Failed to parse existing state:', e)
+            }
+        } else {
+            console.log('Room is empty and no local data to seed')
+        }
     }
 
-    // Called by store when local state changes
-    updateLocalState(papers, connections) {
+    // Single method to sync entire state - just update the JSON text
+    syncState(papers, connections) {
         if (!this.doc) return
 
-        this.isLocalUpdate = true
+        const state = {
+            papers: structuredClone(toRaw(papers)),
+            connections: structuredClone(toRaw(connections))
+        }
 
+        const jsonStr = JSON.stringify(state)
+
+        // Replace entire text content
         this.doc.transact(() => {
-            // Sync Papers
-            // Strategy: Update existing, add new, remove missing
-            // This is a naive full-sync approach. For better perf, we should track granular deltas.
-            // But for this app size, it's acceptable.
-
-            const currentIds = new Set(papers.map(p => p.id))
-            const remoteIds = new Set(this.papersMap.keys())
-
-            // Update/Add
-            papers.forEach(p => {
-                this.papersMap.set(p.id, p)
-            })
-
-            // Remove
-            remoteIds.forEach(id => {
-                if (!currentIds.has(id)) {
-                    this.papersMap.delete(id)
-                }
-            })
-
-            // Sync Connections
-            // Y.Array is harder to diff. We'll clear and push if different.
-            // Optimization: Only update if length or content changed significantly?
-            // For now, we'll just replace content to ensure consistency.
-            // NOTE: This might break other users' selection if we are not careful, 
-            // but since connections are simple objects, it's okay.
-            // A better way for Y.Array is to calculate diff, but let's try simple replace first.
-
-            if (JSON.stringify(this.connectionsArray.toArray()) !== JSON.stringify(connections)) {
-                this.connectionsArray.delete(0, this.connectionsArray.length)
-                this.connectionsArray.insert(0, connections)
-            }
+            this.stateText.delete(0, this.stateText.length)
+            this.stateText.insert(0, jsonStr)
         })
-
-        this.isLocalUpdate = false
     }
 
     destroy() {
         if (this.provider) {
             this.provider.destroy()
         }
-        if (this.persistence) {
-            this.persistence.destroy()
-        }
         if (this.doc) {
             this.doc.destroy()
         }
         this.doc = null
         this.provider = null
-        this.persistence = null
     }
 }
 

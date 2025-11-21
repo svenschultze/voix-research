@@ -4,10 +4,11 @@
     "private": true,
     "description": "Signaling server for Voix Research collaboration",
     "scripts": {
-        "start": "node ./node_modules/y-webrtc/bin/server.js"
+        "start": "npx y-websocket-server"
     },
     "dependencies": {
-        "y-webrtc": "^10.3.0"
+        "@y/websocket-server": "^3.0.0",
+        "y-websocket": "^3.0.0"
     },
     "engines": {
         "node": ">=16.0.0"
